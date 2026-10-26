@@ -7,12 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'core_bridge.dart';
 import 'detail_screen.dart';
 import 'follow_state.dart';
 import 'lan_controller.dart';
-import 'lan_models.dart';
 import 'lan_screen.dart';
 import 'local_store.dart';
 import 'models.dart';
@@ -469,8 +469,10 @@ class _VerticalFeedScreenState extends State<VerticalFeedScreen>
   List<Drama> _excludeWatched(List<Drama> items) {
     if (items.isEmpty) return items;
     final kept = items
-        .where((drama) => widget.store.following(drama.id)?.status !=
-            FollowStatus.watched)
+        .where(
+          (drama) =>
+              widget.store.following(drama.id)?.status != FollowStatus.watched,
+        )
         .toList();
     return kept.isEmpty ? items : kept;
   }
@@ -676,9 +678,7 @@ class _VerticalFeedScreenState extends State<VerticalFeedScreen>
   ///
   /// [localY] 用 `Listener` 的 `event.localPosition.dy`（相对手势层顶部）。
   /// 手势层是 `Positioned.fill`，因此其顶部即屏幕顶部（不含系统栏偏移）。
-  bool _inTopGuard(Offset localPosition) =>
-      localPosition.dy < _topGestureGuard;
-
+  bool _inTopGuard(Offset localPosition) => localPosition.dy < _topGestureGuard;
 
   /// 真正执行"上下滑"的语义（0.7.14 从 `_onVerticalDrag` 拆出，供动画结束时调用）。
   ///
@@ -846,6 +846,9 @@ class _VerticalFeedScreenState extends State<VerticalFeedScreen>
 
   /// 遥控器 / 键盘上下键切换。
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      return KeyEventResult.ignored;
+    }
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
@@ -900,7 +903,8 @@ class _VerticalFeedScreenState extends State<VerticalFeedScreen>
   Widget build(BuildContext context) {
     final content = Focus(
       focusNode: _focus,
-      autofocus: true,
+      autofocus: defaultTargetPlatform != TargetPlatform.windows,
+      canRequestFocus: defaultTargetPlatform != TargetPlatform.windows,
       onKeyEvent: _onKey,
       child: ColoredBox(color: Colors.black, child: _body()),
     );
@@ -1129,10 +1133,8 @@ class _VerticalFeedScreenState extends State<VerticalFeedScreen>
           // 用 `ValueListenableBuilder` 只重建这一层，避免每帧重建整页。
           ValueListenableBuilder<double>(
             valueListenable: _slideOffset,
-            builder: (context, offset, child) => Transform.translate(
-              offset: Offset(0, offset),
-              child: child,
-            ),
+            builder: (context, offset, child) =>
+                Transform.translate(offset: Offset(0, offset), child: child),
             child: MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 gestureSettings: const DeviceGestureSettings(touchSlop: 60),
@@ -1409,6 +1411,8 @@ class _FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
+  final _playerFocus = FocusNode(debugLabel: 'feed-player');
+  final _fullscreenFocus = FocusNode(debugLabel: 'fullscreen-player');
   Player? _player;
   VideoController? _video;
   PlayerInteractions? _interactions;
@@ -1751,9 +1755,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
         // 0.6.9：放弃恢复时必须撤掉"等待第一帧"，否则加载提示会盖住错误与重试按钮。
         _awaitingFirstFrame = false;
         _firstFrameTicks = 0;
-        _error = current.local
-            ? '本地视频播放中断，请返回重试。'
-            : '播放已中断，请点击重试。';
+        _error = current.local ? '本地视频播放中断，请返回重试。' : '播放已中断，请点击重试。';
       });
       _refreshFullscreen(immediate: true);
       return;
@@ -1776,6 +1778,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
+    if (!_foreground) _interactions?.cancel();
     _health.reset();
   }
 
@@ -1992,7 +1995,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
           !_panelOpen,
       baseSpeed: () => _speed,
       onTogglePlayback: _togglePlayback,
-      onFullscreen: () {},
+      onFullscreen: () => unawaited(_toggleLandscape()),
       // 上下滑动切集（0.2.31，用户方案 B：只切集、不切剧）。
       //
       // 说明：这里原先返回空字符串，等于「上下滑切集」从未接通。
@@ -2197,9 +2200,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
         }
         // 0.7.13：起播时若播放器已经报了宽高，直接认定"画面已出"，
         // 避免正常播放时「正在加载视频…」一直挂着。
-        if (playing &&
-            !_hasVideoFrame &&
-            (_player?.state.width ?? 0) > 0) {
+        if (playing && !_hasVideoFrame && (_player?.state.width ?? 0) > 0) {
           _hasVideoFrame = true;
           if (mounted && !_closed) setState(() {});
           _refreshFullscreen(immediate: true);
@@ -2279,6 +2280,11 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
       _autoAdvancing = true;
     }
     if (widget.active && !oldWidget.active) {
+      if (defaultTargetPlatform == TargetPlatform.windows) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.active) _playerFocus.requestFocus();
+        });
+      }
       // 成为当前页：重新上报能否切下一集，避免沿用上一页的状态。
       _reportEpisodeState();
       if (_ready && _error == null) {
@@ -2417,14 +2423,13 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
     // 若离开时还锁着横屏，必须恢复竖屏并显示系统栏，否则整个应用会一直横着。
     if (_landscape) {
       _landscape = false;
-      unawaited(
-        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]),
-      );
-      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+      unawaited(_restorePortraitSystemUi());
     }
     _releasePlayer();
     // 预载器（0.2.31）由**父级**持有并释放（0.6.9 改为全流共享），
     // 本页只借用，不负责 dispose。
+    _playerFocus.dispose();
+    _fullscreenFocus.dispose();
     super.dispose();
   }
 
@@ -2747,7 +2752,10 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
     final generation = _generation;
     final index = _episodeIndex.clamp(0, detail.episodes.length - 1);
     bool current() =>
-        mounted && !_closed && generation == _generation && index == _episodeIndex;
+        mounted &&
+        !_closed &&
+        generation == _generation &&
+        index == _episodeIndex;
     _interactions?.cancel();
     setState(() => _panelOpen = true);
     try {
@@ -3727,6 +3735,10 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
     } else {
       _exitFullscreen();
     }
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await windowManager.setFullScreen(next);
+      return;
+    }
     final mobile =
         defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS;
@@ -3813,6 +3825,10 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
 
   /// 恢复竖屏方向与系统栏（退出全屏收尾）。
   Future<void> _restorePortraitSystemUi() async {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await windowManager.setFullScreen(false);
+      return;
+    }
     final mobile =
         defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS;
@@ -3865,8 +3881,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
     _fsPointer = event.pointer;
     _fsOrigin = _fsLast = event.localPosition;
     _fsMoved = false;
-    _fsGuarded =
-        event.localPosition.dy < PlayerInteractions.topGestureGuard;
+    _fsGuarded = event.localPosition.dy < PlayerInteractions.topGestureGuard;
     _fsDownAt = event.timeStamp;
     _fsGesture = _FsGesture.none;
     _fsSeekTarget = null;
@@ -3919,8 +3934,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
         if (player == null || player.state.duration <= Duration.zero) return;
         final seconds = delta.dx / size.width * _fsSeekSecondsPerWidth;
         final raw =
-            _fsStartPosition +
-            Duration(milliseconds: (seconds * 1000).round());
+            _fsStartPosition + Duration(milliseconds: (seconds * 1000).round());
         final target = Duration(
           milliseconds: raw.inMilliseconds.clamp(
             0,
@@ -4069,10 +4083,9 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
     if (dx.abs() < 12 || dx.abs() <= dy.abs() * 1.2) return;
     final seconds = dx / width * _fsSeekSecondsPerWidth;
     final target = Duration(
-      milliseconds:
-          (_hStart + Duration(milliseconds: (seconds * 1000).round()))
-              .inMilliseconds
-              .clamp(0, player.state.duration.inMilliseconds),
+      milliseconds: (_hStart + Duration(milliseconds: (seconds * 1000).round()))
+          .inMilliseconds
+          .clamp(0, player.state.duration.inMilliseconds),
     );
     _hTarget = target;
     _seekPreview.value = target.inMilliseconds / 1000;
@@ -4110,7 +4123,10 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
   /// 位于 Navigator 路由栈中，因此 `PopScope` 能正常拦截系统返回键。
   /// 按住返回键时：`canPop: true` → 由 `onPopInvokedWithResult` 里
   /// 调用 `_exitFullscreen()` 关闭路由，并复位方向与系统栏。
-  Widget _buildFullscreenLayer() {
+  Widget _buildFullscreenLayer() =>
+      _keyboardSurface(fullscreen: true, child: _buildFullscreenContent());
+
+  Widget _buildFullscreenContent() {
     return PopScope<void>(
       canPop: true,
       onPopInvokedWithResult: (didPop, _) {
@@ -4200,10 +4216,14 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
                     // 与竖屏主层保持一致（0.6.11）：补上"已就绪但无画面"的兜底，
                     // 避免全屏时出现纯黑无文字。
                     if (_loading ||
-                        (_awaitingFirstFrame && !(_player?.state.playing ?? false)) ||
+                        (_awaitingFirstFrame &&
+                            !(_player?.state.playing ?? false)) ||
                         // 0.7.13：改为判断"是否出过画面"。此前看 `width <= 0`，
                         // 而部分流始终不报宽高 → 正常播放时提示也一直挂着。
-                        (!_userPaused && _ready && _error == null && !_hasVideoFrame))
+                        (!_userPaused &&
+                            _ready &&
+                            _error == null &&
+                            !_hasVideoFrame))
                       const IgnorePointer(
                         child: LoadingHint(message: '正在加载视频…', dark: true),
                       )
@@ -4242,9 +4262,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
                     if (_hasEpisodeBadge)
                       IgnorePointer(
                         child: _episodeBadge(
-                          textKey: const ValueKey(
-                            'fullscreen-episode-badge',
-                          ),
+                          textKey: const ValueKey('fullscreen-episode-badge'),
                         ),
                       ),
                     // 控件层：自动隐藏。
@@ -4311,98 +4329,101 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
                                       ValueListenableBuilder<double?>(
                                         valueListenable: _seekPreview,
                                         builder: (context, preview, _) => Row(
-                                        children: [
-                                          IconButton(
-                                            key: const ValueKey(
-                                              'fullscreen-play-toggle',
+                                          children: [
+                                            IconButton(
+                                              key: const ValueKey(
+                                                'fullscreen-play-toggle',
+                                              ),
+                                              tooltip: (state?.playing ?? false)
+                                                  ? '暂停'
+                                                  : '播放',
+                                              onPressed: _togglePlayback,
+                                              icon: Icon(
+                                                (state?.playing ?? false)
+                                                    ? Icons.pause_rounded
+                                                    : Icons.play_arrow_rounded,
+                                                color: Colors.white,
+                                              ),
                                             ),
-                                            tooltip: (state?.playing ?? false)
-                                                ? '暂停'
-                                                : '播放',
-                                            onPressed: _togglePlayback,
-                                            icon: Icon(
-                                              (state?.playing ?? false)
-                                                  ? Icons.pause_rounded
-                                                  : Icons.play_arrow_rounded,
-                                              color: Colors.white,
+                                            Text(
+                                              '${formatPosition(((preview ?? _seekValue) ?? position / 1000))} / ${formatPosition(duration / 1000)}',
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 12,
+                                              ),
                                             ),
-                                          ),
-                                          Text(
-                                            '${formatPosition(((preview ?? _seekValue) ?? position / 1000))} / ${formatPosition(duration / 1000)}',
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                          Expanded(
-                                            child: SizedBox(
-                                              height: 32,
-                                              child: SliderTheme(
-                                                data: fullscreenSliderTheme,
-                                                child: Slider(
-                                                  key: const ValueKey(
-                                                    'fullscreen-progress',
-                                                  ),
-                                                  value:
-                                                      ((preview ?? _seekValue) ??
-                                                              position / 1000)
-                                                          .clamp(0, total),
-                                                  max: total,
-                                                  secondaryTrackValue:
-                                                      (buffered / 1000).clamp(
-                                                        0,
-                                                        total,
-                                                      ),
-                                                  onChangeStart: duration > 0
-                                                      ? (_) {
-                                                          _interactions
-                                                              ?.cancel();
-                                                          _hideTimer?.cancel();
-                                                        }
-                                                      : null,
-                                                  onChanged: duration <= 0
-                                                      ? null
-                                                      : (value) {
-                                                          _hideTimer?.cancel();
-                                                          setState(
-                                                            () => _seekValue =
-                                                                value,
-                                                          );
-                                                        },
-                                                  onChangeEnd: (value) {
-                                                    if (duration > 0) {
-                                                      unawaited(
-                                                        _seekTo(
-                                                          Duration(
-                                                            milliseconds:
-                                                                (value * 1000)
-                                                                    .round(),
-                                                          ),
+                                            Expanded(
+                                              child: SizedBox(
+                                                height: 32,
+                                                child: SliderTheme(
+                                                  data: fullscreenSliderTheme,
+                                                  child: Slider(
+                                                    key: const ValueKey(
+                                                      'fullscreen-progress',
+                                                    ),
+                                                    value:
+                                                        ((preview ??
+                                                                    _seekValue) ??
+                                                                position / 1000)
+                                                            .clamp(0, total),
+                                                    max: total,
+                                                    secondaryTrackValue:
+                                                        (buffered / 1000).clamp(
+                                                          0,
+                                                          total,
                                                         ),
+                                                    onChangeStart: duration > 0
+                                                        ? (_) {
+                                                            _interactions
+                                                                ?.cancel();
+                                                            _hideTimer
+                                                                ?.cancel();
+                                                          }
+                                                        : null,
+                                                    onChanged: duration <= 0
+                                                        ? null
+                                                        : (value) {
+                                                            _hideTimer
+                                                                ?.cancel();
+                                                            setState(
+                                                              () => _seekValue =
+                                                                  value,
+                                                            );
+                                                          },
+                                                    onChangeEnd: (value) {
+                                                      if (duration > 0) {
+                                                        unawaited(
+                                                          _seekTo(
+                                                            Duration(
+                                                              milliseconds:
+                                                                  (value * 1000)
+                                                                      .round(),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }
+                                                      setState(
+                                                        () => _seekValue = null,
                                                       );
-                                                    }
-                                                    setState(
-                                                      () => _seekValue = null,
-                                                    );
-                                                    _showControls();
-                                                  },
+                                                      _showControls();
+                                                    },
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                          IconButton(
-                                            key: const ValueKey(
-                                              'fullscreen-exit',
+                                            IconButton(
+                                              key: const ValueKey(
+                                                'fullscreen-exit',
+                                              ),
+                                              tooltip: '退出全屏',
+                                              onPressed: _toggleLandscape,
+                                              icon: const Icon(
+                                                Icons.fullscreen_exit_rounded,
+                                                color: Colors.white,
+                                              ),
                                             ),
-                                            tooltip: '退出全屏',
-                                            onPressed: _toggleLandscape,
-                                            icon: const Icon(
-                                              Icons.fullscreen_exit_rounded,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                          ],
+                                        ),
                                       ),
                                       Row(
                                         mainAxisAlignment:
@@ -4563,8 +4584,51 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
     _fullscreenRevision.value++;
   }
 
+  Widget _keyboardSurface({required Widget child, bool fullscreen = false}) {
+    if (defaultTargetPlatform != TargetPlatform.windows) return child;
+    final focus = fullscreen ? _fullscreenFocus : _playerFocus;
+    return Focus(
+      focusNode: focus,
+      autofocus: widget.active,
+      canRequestFocus: widget.active,
+      onFocusChange: (focused) {
+        if (!focused) _interactions?.cancel();
+      },
+      onKeyEvent: (node, event) {
+        if (_closed ||
+            !widget.active ||
+            _panelOpen ||
+            ModalRoute.of(node.context!)?.isCurrent != true) {
+          return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          if (event is KeyDownEvent) {
+            if (_landscape) {
+              unawaited(_toggleLandscape());
+            } else {
+              final navigator = Navigator.of(node.context!);
+              if (!navigator.canPop()) return KeyEventResult.ignored;
+              unawaited(navigator.maybePop());
+            }
+          }
+          return KeyEventResult.handled;
+        }
+        return _interactions?.key(event) ?? KeyEventResult.ignored;
+      },
+      child: Listener(
+        onPointerDown: (_) {
+          if (!focus.hasFocus) focus.requestFocus();
+        },
+        child: child,
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      _keyboardSurface(child: _buildPlayerLayer());
+
+  Widget _buildPlayerLayer() {
     final video = _video;
     final state = _player?.state;
     // 长按加速（3 倍速）期间只保留中央的加速提示，
@@ -4777,220 +4841,227 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
                 final buffered = live?.buffer.inMilliseconds ?? 0;
                 final total = duration > 0 ? duration / 1000 : 1.0;
                 return Stack(
-                fit: StackFit.expand,
-                children: [
-                  const IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Color(0x99000000),
-                            Colors.transparent,
-                            Color(0xDD000000),
-                          ],
-                          stops: [0, .45, 1],
+                  fit: StackFit.expand,
+                  children: [
+                    const IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0x99000000),
+                              Colors.transparent,
+                              Color(0xDD000000),
+                            ],
+                            stops: [0, .45, 1],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  // 左上角集数标签（0.6.2）。
-                  //
-                  // 只在有多个剧集时显示：单集、本地单文件不显示，
-                  // 避免出现"第1集"这种没有信息量的标签。
-                  if (_hasEpisodeBadge) _episodeBadge(),
-                  // 右上角推送按钮（0.6.4，从老播放器迁移）。
-                  //
-                  // 位置选择理由：底部按钮行已固定为 5 个等宽槽位
-                  // （320 窄屏槽位仅 59.2px，而"连播下一部"标签已 55px），
-                  // 再加第 6 个会把标签挤到截断；因此放在视频右上角，
-                  // 与左上角集数标签左右对称，也不占用底部功能位。
-                  // 位于控件层内 → 跟随控件一起显隐。
-                  if (_canPush) _pushButton(),
-                  // 暂停时显示中央播放按钮。
-                  if (!(state?.playing ?? false) &&
-                      !_loading &&
-                      _error == null &&
-                      !_panelOpen)
-                    Center(
-                      child: IconButton.filledTonal(
-                        tooltip: '播放',
-                        iconSize: 42,
-                        onPressed: _togglePlayback,
-                        icon: const Icon(Icons.play_arrow_rounded),
+                    // 左上角集数标签（0.6.2）。
+                    //
+                    // 只在有多个剧集时显示：单集、本地单文件不显示，
+                    // 避免出现"第1集"这种没有信息量的标签。
+                    if (_hasEpisodeBadge) _episodeBadge(),
+                    // 右上角推送按钮（0.6.4，从老播放器迁移）。
+                    //
+                    // 位置选择理由：底部按钮行已固定为 5 个等宽槽位
+                    // （320 窄屏槽位仅 59.2px，而"连播下一部"标签已 55px），
+                    // 再加第 6 个会把标签挤到截断；因此放在视频右上角，
+                    // 与左上角集数标签左右对称，也不占用底部功能位。
+                    // 位于控件层内 → 跟随控件一起显隐。
+                    if (_canPush) _pushButton(),
+                    // 暂停时显示中央播放按钮。
+                    if (!(state?.playing ?? false) &&
+                        !_loading &&
+                        _error == null &&
+                        !_panelOpen)
+                      Center(
+                        child: IconButton.filledTonal(
+                          tooltip: '播放',
+                          iconSize: 42,
+                          onPressed: _togglePlayback,
+                          icon: const Icon(Icons.play_arrow_rounded),
+                        ),
                       ),
-                    ),
-                  // 长按加速提示。
-                  //
-                  // 0.2.26 修正：【已移除】，改到控件层外独立渲染。
-                  // 原因：该提示原先在控件层内部，受 `IgnorePointer(ignoring: !visible)`
-                  // 控制；而加速时 `visible` 恰好为 false，导致长按加速时
-                  // 连「3 倍速 · 松开恢复」都不显示（用户：“按住后啥也不显示”）。
-                  // 详见文件下方“长按加速提示（独立层）”块。
-                  // 底部区域：左侧信息面板 + 右侧功能按钮。
-                  //
-                  // 修复「横屏按钮点了没反应」的根因：原先底部面板与右侧按钮组
-                  // 是两个独立的 Positioned / Align，面板内容多时（剧名 + 两行简介
-                  // + 热度行）会向上撑高，把位于 right:8, bottom:190 的按钮组盖住，
-                  // 导致按钮收不到点击（表现为"完全没反应"，连按钮文字都不变）。
-                  // 改为同一个 Column 布局后，两者在结构上永不重叠。
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Colors.black87],
+                    // 长按加速提示。
+                    //
+                    // 0.2.26 修正：【已移除】，改到控件层外独立渲染。
+                    // 原因：该提示原先在控件层内部，受 `IgnorePointer(ignoring: !visible)`
+                    // 控制；而加速时 `visible` 恰好为 false，导致长按加速时
+                    // 连「3 倍速 · 松开恢复」都不显示（用户：“按住后啥也不显示”）。
+                    // 详见文件下方“长按加速提示（独立层）”块。
+                    // 底部区域：左侧信息面板 + 右侧功能按钮。
+                    //
+                    // 修复「横屏按钮点了没反应」的根因：原先底部面板与右侧按钮组
+                    // 是两个独立的 Positioned / Align，面板内容多时（剧名 + 两行简介
+                    // + 热度行）会向上撑高，把位于 right:8, bottom:190 的按钮组盖住，
+                    // 导致按钮收不到点击（表现为"完全没反应"，连按钮文字都不变）。
+                    // 改为同一个 Column 布局后，两者在结构上永不重叠。
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Colors.transparent, Colors.black87],
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _titleBar(),
+                                ValueListenableBuilder<double?>(
+                                  valueListenable: _seekPreview,
+                                  builder: (context, preview, _) => Row(
+                                    children: [
+                                      IconButton(
+                                        key: const ValueKey('feed-play-toggle'),
+                                        tooltip: (state?.playing ?? false)
+                                            ? '暂停'
+                                            : '播放',
+                                        onPressed: _togglePlayback,
+                                        icon: Icon(
+                                          (state?.playing ?? false)
+                                              ? Icons.pause_rounded
+                                              : Icons.play_arrow_rounded,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${formatPosition(((preview ?? _seekValue) ?? position / 1000))} / ${formatPosition(duration / 1000)}',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: SliderTheme(
+                                          data: SliderTheme.of(
+                                            context,
+                                          ).copyWith(trackHeight: 3),
+                                          child: Slider(
+                                            key: const ValueKey(
+                                              'feed-progress',
+                                            ),
+                                            value:
+                                                ((preview ?? _seekValue) ??
+                                                        position / 1000)
+                                                    .clamp(0, total),
+                                            max: total,
+                                            secondaryTrackValue:
+                                                (buffered / 1000).clamp(
+                                                  0,
+                                                  total,
+                                                ),
+                                            semanticFormatterCallback:
+                                                formatPosition,
+                                            onChangeStart: duration > 0
+                                                ? (_) {
+                                                    _interactions?.cancel();
+                                                    _hideTimer?.cancel();
+                                                  }
+                                                : null,
+                                            onChanged: duration <= 0
+                                                ? null
+                                                : (value) {
+                                                    _hideTimer?.cancel();
+                                                    setState(
+                                                      () => _seekValue = value,
+                                                    );
+                                                  },
+                                            onChangeEnd: (value) {
+                                              if (duration > 0) {
+                                                unawaited(
+                                                  _seekTo(
+                                                    Duration(
+                                                      milliseconds:
+                                                          (value * 1000)
+                                                              .round(),
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              setState(() => _seekValue = null);
+                                              _showControls();
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        key: const ValueKey('feed-landscape'),
+                                        tooltip: _landscape ? '退出全屏' : '全屏',
+                                        onPressed: _toggleLandscape,
+                                        icon: Icon(
+                                          _landscape
+                                              ? Icons.fullscreen_exit_rounded
+                                              : Icons.fullscreen_rounded,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    _sideButton(
+                                      key: const ValueKey('feed-speed'),
+                                      icon: Icons.speed_rounded,
+                                      label: '${_speed}x',
+                                      onPressed: _openSpeedMenu,
+                                    ),
+                                    _sideButton(
+                                      key: const ValueKey('feed-quality'),
+                                      icon: Icons.hd_rounded,
+                                      label: _qualityLabel,
+                                      onPressed: _openQualityMenu,
+                                    ),
+                                    _sideButton(
+                                      key: const ValueKey('feed-episodes'),
+                                      icon: Icons.grid_view_rounded,
+                                      label: '选集',
+                                      onPressed: _openEpisodes,
+                                    ),
+                                    _sideButton(
+                                      key: const ValueKey('feed-follow'),
+                                      icon: _followed
+                                          ? Icons.bookmark_rounded
+                                          : Icons.bookmark_border_rounded,
+                                      label: _followed ? '已追剧' : '追剧',
+                                      onPressed: _toggleFollow,
+                                    ),
+                                    if (!widget.singleDrama)
+                                      _sideButton(
+                                        key: const ValueKey('feed-auto-next'),
+                                        icon: widget.autoNextEpisode
+                                            ? Icons.repeat_one_rounded
+                                            : Icons.skip_next_rounded,
+                                        label: widget.autoNextEpisode
+                                            ? '连播本剧'
+                                            : '连播下一部',
+                                        color: widget.autoNextEpisode
+                                            ? const Color(0xFFFF765F)
+                                            : Colors.white,
+                                        onPressed: widget.onToggleAutoNext,
+                                      ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _titleBar(),
-                              ValueListenableBuilder<double?>(
-                                valueListenable: _seekPreview,
-                                builder: (context, preview, _) => Row(
-                                children: [
-                                  IconButton(
-                                    key: const ValueKey('feed-play-toggle'),
-                                    tooltip: (state?.playing ?? false)
-                                        ? '暂停'
-                                        : '播放',
-                                    onPressed: _togglePlayback,
-                                    icon: Icon(
-                                      (state?.playing ?? false)
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  Text(
-                                    '${formatPosition(((preview ?? _seekValue) ?? position / 1000))} / ${formatPosition(duration / 1000)}',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: SliderTheme(
-                                      data: SliderTheme.of(
-                                        context,
-                                      ).copyWith(trackHeight: 3),
-                                      child: Slider(
-                                        key: const ValueKey('feed-progress'),
-                                        value:
-                                            ((preview ?? _seekValue) ?? position / 1000)
-                                                .clamp(0, total),
-                                        max: total,
-                                        secondaryTrackValue:
-                                            (buffered / 1000).clamp(0, total),
-                                        semanticFormatterCallback:
-                                            formatPosition,
-                                        onChangeStart: duration > 0
-                                            ? (_) {
-                                                _interactions?.cancel();
-                                                _hideTimer?.cancel();
-                                              }
-                                            : null,
-                                        onChanged: duration <= 0
-                                            ? null
-                                            : (value) {
-                                                _hideTimer?.cancel();
-                                                setState(
-                                                  () => _seekValue = value,
-                                                );
-                                              },
-                                        onChangeEnd: (value) {
-                                          if (duration > 0) {
-                                            unawaited(
-                                              _seekTo(
-                                                Duration(
-                                                  milliseconds: (value * 1000)
-                                                      .round(),
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                          setState(() => _seekValue = null);
-                                          _showControls();
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    key: const ValueKey('feed-landscape'),
-                                    tooltip: _landscape ? '退出全屏' : '全屏',
-                                    onPressed: _toggleLandscape,
-                                    icon: Icon(
-                                      _landscape
-                                          ? Icons.fullscreen_exit_rounded
-                                          : Icons.fullscreen_rounded,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              ),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  _sideButton(
-                                    key: const ValueKey('feed-speed'),
-                                    icon: Icons.speed_rounded,
-                                    label: '${_speed}x',
-                                    onPressed: _openSpeedMenu,
-                                  ),
-                                  _sideButton(
-                                    key: const ValueKey('feed-quality'),
-                                    icon: Icons.hd_rounded,
-                                    label: _qualityLabel,
-                                    onPressed: _openQualityMenu,
-                                  ),
-                                  _sideButton(
-                                    key: const ValueKey('feed-episodes'),
-                                    icon: Icons.grid_view_rounded,
-                                    label: '选集',
-                                    onPressed: _openEpisodes,
-                                  ),
-                                  _sideButton(
-                                    key: const ValueKey('feed-follow'),
-                                    icon: _followed
-                                        ? Icons.bookmark_rounded
-                                        : Icons.bookmark_border_rounded,
-                                    label: _followed ? '已追剧' : '追剧',
-                                    onPressed: _toggleFollow,
-                                  ),
-                                  if (!widget.singleDrama)
-                                    _sideButton(
-                                      key: const ValueKey('feed-auto-next'),
-                                      icon: widget.autoNextEpisode
-                                          ? Icons.repeat_one_rounded
-                                          : Icons.skip_next_rounded,
-                                      label: widget.autoNextEpisode
-                                          ? '连播本剧'
-                                          : '连播下一部',
-                                      color: widget.autoNextEpisode
-                                          ? const Color(0xFFFF765F)
-                                          : Colors.white,
-                                      onPressed: widget.onToggleAutoNext,
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
                   ],
                 );
               },
@@ -5040,7 +5111,6 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
   );
 }
 
-
 /// 方向锁定手势识别器（0.7.12，`XQ-0120`）。
 ///
 /// 为什么需要它：竖屏竖滑流里，「左右滑调进度」与 `PageView` 的「上下翻页」
@@ -5061,7 +5131,6 @@ class _DirectionalSeekGestureRecognizer extends OneSequenceGestureRecognizer {
 
   /// 水平方向判定为「主导」的最小位移。
   static const double _horizontalWin = 6;
-
 
   @override
   void addAllowedPointer(PointerDownEvent event) {

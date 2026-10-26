@@ -200,21 +200,21 @@ func (d *Downloader) resolveHongguoMedia(ctx context.Context, task Task) (provid
 	}
 	media, nativeErr := d.resolveHongguoAppMedia(ctx, videoID)
 	if nativeErr == nil {
-		return media, nil
+		return d.selectReachableHongguoMedia(ctx, media)
 	}
 	if err := ctx.Err(); err != nil {
 		return providerMedia{}, err
 	}
 	media, pageErr := d.resolveHongguoWebMedia(ctx, seriesID, videoID)
 	if pageErr == nil {
-		return media, nil
+		return d.selectReachableHongguoMedia(ctx, media)
 	}
 	if err := ctx.Err(); err != nil {
 		return providerMedia{}, err
 	}
 	media, apiErr := d.resolveHongguoPlaybackAPI(ctx, seriesID, videoID)
 	if apiErr == nil {
-		return media, nil
+		return d.selectReachableHongguoMedia(ctx, media)
 	}
 	return providerMedia{}, fmt.Errorf("红果 App 取流失败：%v；网页取流失败：%v；备用取流失败：%w", publicError(nativeErr), publicError(pageErr), apiErr)
 }

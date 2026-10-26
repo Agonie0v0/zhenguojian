@@ -168,8 +168,7 @@ class PlayerInteractions extends ChangeNotifier {
   /// 顶部禁滑区高度（0.6.7，与 `vertical_feed_screen.dart` 保持一致）。
   static const double topGestureGuard = 60;
 
-  bool _inTopGuard(Offset localPosition) =>
-      localPosition.dy < topGestureGuard;
+  bool _inTopGuard(Offset localPosition) => localPosition.dy < topGestureGuard;
 
   void pointerMove(PointerMoveEvent event) {
     if (_pointer != event.pointer || _origin == null) return;
@@ -250,7 +249,8 @@ class PlayerInteractions extends ChangeNotifier {
     final hardware = HardwareKeyboard.instance;
     if (hardware.isAltPressed ||
         hardware.isMetaPressed ||
-        hardware.isShiftPressed) {
+        hardware.isShiftPressed ||
+        hardware.isControlPressed) {
       cancel();
       return KeyEventResult.ignored;
     }
@@ -261,7 +261,7 @@ class PlayerInteractions extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    if (hardware.isControlPressed || !available()) {
+    if (!available()) {
       return KeyEventResult.ignored;
     }
     if (key != LogicalKeyboardKey.arrowRight) _endHold();

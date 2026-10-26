@@ -49,6 +49,33 @@ func TestHongguoBackupAddressesAndCodecAlternatives(t *testing.T) {
 	}
 }
 
+func TestHongguoSelectsReachableSignedBackup(t *testing.T) {
+	var paths []string
+	d := sourceFixtureDownloader(t, func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		if r.Header.Get("Range") != "bytes=0-1023" || r.Header.Get("Referer") != "https://novel.snssdk.com/" || r.URL.RawQuery != "signature=a%2Fb" {
+			t.Fatal("probe changed signed URL, headers or byte limit")
+		}
+		if r.URL.Path == "/denied.mp4" {
+			return sourceFixtureResponse(r, 403, "forbidden"), nil
+		}
+		return sourceFixtureResponse(r, 206, strings.Repeat("v", 1024)), nil
+	})
+	media := providerMedia{URL: "https://first.test/denied.mp4?signature=a%2Fb", Referer: "https://novel.snssdk.com/", Quality: 1080, CENCKey: []byte("0123456789abcdef")}
+	backup := media
+	backup.URL = "https://second.test/working.mp4?signature=a%2Fb"
+	media.Variants = []providerMedia{media, backup}
+	selected, err := d.selectReachableHongguoMedia(context.Background(), media)
+	if err != nil || selected.URL != backup.URL || !reflect.DeepEqual(selected.CENCKey, backup.CENCKey) || !reflect.DeepEqual(paths, []string{"/denied.mp4", "/working.mp4"}) {
+		t.Fatalf("backup was not selected with its original key: %v, paths=%v", err, paths)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := d.selectReachableHongguoMedia(ctx, media); !errors.Is(err, context.Canceled) || len(paths) != 2 {
+		t.Fatal("cancelled selection issued more requests", err)
+	}
+}
+
 func TestNativePlaybackFallbackPreservesKeysAndReleasesOnlyOldSession(t *testing.T) {
 	engine, err := newNativeEngine(t.TempDir())
 	if err != nil {
@@ -65,7 +92,8 @@ func TestNativePlaybackFallbackPreservesKeysAndReleasesOnlyOldSession(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.URL != second.URL || next.Headers["Referer"] != second.Referer || next.Key != "66656463626139383736353433323130" || next.RouteIndex != 1 || next.Session == plan.Session {
+	selected := engine.playbacks[next.Session]
+	if selected.media[selected.index].URL != second.URL || !strings.HasPrefix(next.URL, "http://127.0.0.1:") || next.Headers["Referer"] != second.Referer || next.Key != "66656463626139383736353433323130" || next.RouteIndex != 1 || next.Session == plan.Session {
 		t.Fatalf("alternate route lost its credentials: %+v", next)
 	}
 	engine.nativeReleasePlayback(plan.Session)

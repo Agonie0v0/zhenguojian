@@ -1,6 +1,7 @@
 import 'package:duanju_app/local_store.dart';
 import 'package:duanju_app/vertical_feed_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -90,4 +91,88 @@ void main() {
     );
     expect(player.opened, hasLength(1));
   });
+
+  testWidgets('Windows 播放快捷键在普通和全屏画面均可使用', (tester) async {
+    final fullscreen = <bool>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('window_manager'),
+      (call) async {
+        if (call.method == 'setFullScreen') {
+          fullscreen.add((call.arguments as Map)['isFullScreen'] as bool);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('window_manager'),
+        null,
+      ),
+    );
+    final (store, repository, player) = await setUpFeed(tester, active: true);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await settle(tester);
+    expect(player.state.playing, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await settle(tester);
+    expect(player.state.playing, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await settle(tester);
+    expect(player.state.position, const Duration(seconds: 5));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await settle(tester);
+    expect(player.state.position, Duration.zero);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await settle(tester);
+    expect(player.state.volume, 95);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await settle(tester);
+    expect(player.state.volume, 100);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+    await settle(tester);
+    expect(player.state.volume, 0);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+    await settle(tester);
+    expect(player.state.volume, 100);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(player.state.rate, 3);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+    await settle(tester);
+    expect(player.state.rate, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await settle(tester);
+    expect(fullscreen.last, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await settle(tester);
+    expect(player.state.playing, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.f11);
+    await settle(tester);
+    expect(fullscreen.last, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.f11);
+    await settle(tester);
+    expect(fullscreen.last, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(fullscreen.last, isFalse);
+    final toggles = fullscreen.length;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+    expect(fullscreen, hasLength(toggles));
+    await pumpFeed(
+      tester,
+      repository: repository,
+      player: player,
+      store: store,
+      active: false,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+    await settle(tester);
+    expect(player.state.volume, 100);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

@@ -33,6 +33,7 @@ Future<void> runPackageSmoke(List<String> arguments) async {
       configuration: const PlayerConfiguration(muted: true, vo: 'null'),
     );
     await player.setAudioTrack(AudioTrack.no());
+    await player.setVideoTrack(VideoTrack.auto());
     final advancing = player.stream.position.firstWhere(
       (time) => time.inMilliseconds >= 400,
     );

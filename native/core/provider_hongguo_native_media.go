@@ -18,11 +18,11 @@ import (
 // 2026-10-22 起红果旧接口 `/novel/player/video_model/v1/` 已对部分分集
 // 不再返回 video_model；新链路为：
 //
-//	1. POST `/novel/player/multi_video_model/v1/`（六头签名 + 播放端专属
-//	   query 字段），请求体用 `mixed_video_id_map`；
-//	2. 响应 `data[vid].video_model` 仍是 JSON 字符串，直接交给选流逻辑；
-//	3. 若只给了 `fallback_api`，则二次 GET 该地址，从
-//	   `video_info.data.video_list` 取片源。
+//  1. POST `/novel/player/multi_video_model/v1/`（六头签名 + 播放端专属
+//     query 字段），请求体用 `mixed_video_id_map`；
+//  2. 响应 `data[vid].video_model` 仍是 JSON 字符串，直接交给选流逻辑；
+//  3. 若只给了 `fallback_api`，则二次 GET 该地址，从
+//     `video_info.data.video_list` 取片源。
 func (downloader *Downloader) resolveHongguoAppMedia(ctx context.Context, videoID string) (providerMedia, error) {
 	if !hongguoNumericID.MatchString(videoID) {
 		return providerMedia{}, errors.New("红果视频 ID 无效")
@@ -41,13 +41,13 @@ func (downloader *Downloader) resolveHongguoAppMedia(ctx context.Context, videoI
 		"mixed_video_id_map": map[string]any{"1004": []string{videoID}},
 	}
 	extra := url.Values{
-		"host_abi":               {"arm64-v8a"},
-		"dragon_device_type":     {"phone"},
-		"pv_player":              {"73532"},
-		"compliance_status":      {"0"},
+		"host_abi":                {"arm64-v8a"},
+		"dragon_device_type":      {"phone"},
+		"pv_player":               {"73532"},
+		"compliance_status":       {"0"},
 		"need_personal_recommend": {"1"},
-		"player_so_load":         {"1"},
-		"is_android_pad_screen":  {"0"},
+		"player_so_load":          {"1"},
+		"is_android_pad_screen":   {"0"},
 	}
 	result, err := downloader.hongguoAppRequest(ctx, http.MethodPost, "/novel/player/multi_video_model/v1/", extra, payload)
 	if err != nil {
@@ -246,4 +246,27 @@ func hongguoMediaAddresses(info map[string]any) []string {
 		add(info[key])
 	}
 	return addresses
+}
+
+func (d *Downloader) selectReachableHongguoMedia(ctx context.Context, media providerMedia) (providerMedia, error) {
+	options := nativePlaybackChoices(media, 0).media
+	var lastErr error
+	for index, option := range options {
+		if err := ctx.Err(); err != nil {
+			return providerMedia{}, err
+		}
+		body, err := d.sourceProbeBytes(providerMediaContext(ctx, option.credentials), option.URL, option.Referer, false)
+		if err == nil && len(body) > 0 {
+			option.Variants = options[index+1:]
+			return option, nil
+		}
+		if err == nil {
+			err = errors.New("红果媒体服务器返回空内容")
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("红果没有可用的播放线路")
+	}
+	return providerMedia{}, lastErr
 }
