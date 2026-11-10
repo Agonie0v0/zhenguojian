@@ -30,7 +30,8 @@ class NetworkState {
   static const _timeout = Duration(milliseconds: 800);
 
   static Future<NetworkKind> current() async {
-    if (defaultTargetPlatform != TargetPlatform.android) {
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
       return NetworkKind.unknown;
     }
     try {

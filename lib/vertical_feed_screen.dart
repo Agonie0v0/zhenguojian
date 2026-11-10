@@ -3935,6 +3935,11 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
 
   /// 读取系统媒体音量并缓存（0.7.5）。
   Future<void> _syncSystemVolume() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      _systemVolumeMax = 100;
+      _systemVolumeIndex = (_player?.state.volume ?? 100).round().clamp(0, 100);
+      return;
+    }
     final volume = await SystemVolume.read();
     if (volume == null || _closed) return;
     _systemVolumeIndex = volume.current;
@@ -4000,7 +4005,11 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
         final index = (ratio * max).round();
         if (index != _systemVolumeIndex) {
           _systemVolumeIndex = index;
-          unawaited(SystemVolume.write(index));
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            unawaited(SystemVolume.write(index));
+          } else {
+            unawaited(_player?.setVolume(index.toDouble()));
+          }
         }
         _interactions?.hint(
           index <= 0 ? '已静音' : '音量 ${(ratio * 100).round()}%',

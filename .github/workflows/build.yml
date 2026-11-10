@@ -1,0 +1,154 @@
+name: Build and verify iOS and Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format lib integration_test/platform_playback_test.dart
+      - run: dart analyze lib integration_test/platform_playback_test.dart
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Flutter feature regression report
+        run: flutter test --dart-define=DISABLE_REMOTE_IMAGES=true --dart-define=ALL_SOURCES=true
+        continue-on-error: true
+      - name: Go feature regression report
+        working-directory: native
+        run: go test -race ./...
+        continue-on-error: true
+
+  windows:
+    needs: checks
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - name: Set up compiler and media tools
+        shell: pwsh
+        run: |
+          choco install mingw ffmpeg innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Tool installation failed' }
+          $compiler = Get-ChildItem 'C:\ProgramData\mingw64', 'C:\ProgramData\chocolatey\lib\mingw' -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($compiler) { $compiler.DirectoryName >> $env:GITHUB_PATH }
+      - run: python scripts/build_windows.py --all-sources
+      - name: Verify packaged player and FFmpeg
+        run: python scripts/smoke_windows.py --all-sources
+      - name: Verify application playback
+        shell: pwsh
+        run: |
+          python scripts/create_test_media.py
+          Start-Process python -ArgumentList 'scripts/serve_test_media.py', '--port', '8765' -WindowStyle Hidden -RedirectStandardOutput build/media-server.log -RedirectStandardError build/media-server-error.log
+          flutter drive -d windows --driver=test_driver/playback.dart --target=integration_test/platform_playback_test.dart --dart-define=ALL_SOURCES=true --dart-define=DISABLE_REMOTE_IMAGES=true --dart-define=FIXTURE_BASE_URL=http://127.0.0.1:8765
+          if ($LASTEXITCODE -ne 0) { throw 'Application playback verification failed' }
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = (Select-String pubspec.yaml -Pattern '^version:\s*(\S+)').Matches.Groups[1].Value -split '\+'
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$($version[0])" "/DAppBuild=$($version[1])" scripts/windows_installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows
+          path: |
+            dist/windows/*
+            build/windows-package-smoke.json
+            build/device-test/results/*
+
+  ios:
+    needs: checks
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - run: python3 scripts/build_ios.py --all-sources --simulator
+      - name: Verify iOS application playback
+        run: |
+          set -euo pipefail
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          python3 scripts/create_test_media.py
+          python3 scripts/serve_test_media.py --port 8765 > build/media-server.log 2>&1 &
+          device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for devices in json.load(sys.stdin)["devices"].values() for d in devices if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          flutter drive -d "$device" --driver=test_driver/playback.dart --target=integration_test/platform_playback_test.dart --dart-define=ALL_SOURCES=true --dart-define=DISABLE_REMOTE_IMAGES=true --dart-define=FIXTURE_BASE_URL=http://127.0.0.1:8765
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios
+          path: |
+            dist/ios/*
+            build/device-test/results/*
+
+  release:
+    needs: [windows, ios]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish verified packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir release
+          find artifacts -type f \( -name '*.ipa' -o -name '*.zip' -o -name '*.exe' -o -name '*.json' \) -exec cp {} release/ \;
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          version=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml)
+          tag="platform-v${version//+/-}-${GITHUB_SHA:0:7}"
+          printf '%s\n' '真果鉴 Windows 安装程序、免安装包和 iOS 未签名 IPA。包启动和合成媒体播放验证已通过，详情见随附验证报告；未签名 IPA 安装前需自行签名。源站可用性随网络和上游接口变化，未完成全部功能及真机验收。' > notes.md
+          gh release create "$tag" release/* --target "$GITHUB_SHA" --title "真果鉴 ${version} iOS / Windows" --notes-file notes.md

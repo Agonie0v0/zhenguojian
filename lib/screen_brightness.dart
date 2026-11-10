@@ -21,11 +21,14 @@ class ScreenBrightness {
 
   /// 单元测试环境直接短路，避免 `Future.timeout` 留下未清理的计时器。
   static bool get _testing => Platform.environment['FLUTTER_TEST'] == 'true';
+  static bool get _supported =>
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
 
   /// 读取系统当前亮度比例（0~1）；不可用时返回 `null`。
   static Future<double?> read() async {
     if (_testing) return null;
-    if (defaultTargetPlatform != TargetPlatform.android) return null;
+    if (!_supported) return null;
     try {
       final value = await channel
           .invokeMethod<double>('screenBrightness')
@@ -42,7 +45,7 @@ class ScreenBrightness {
   /// 设置本窗口亮度（0~1）。
   static Future<void> set(double ratio) async {
     if (_testing) return;
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_supported) return;
     try {
       await channel
           .invokeMethod<bool>('setScreenBrightness', {
@@ -59,7 +62,7 @@ class ScreenBrightness {
   /// 恢复窗口亮度为"跟随系统"。
   static Future<void> reset() async {
     if (_testing) return;
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_supported) return;
     try {
       await channel
           .invokeMethod<bool>('resetScreenBrightness')
