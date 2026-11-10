@@ -111,11 +111,15 @@ void main() {
         final player = Player();
         final controller = VideoController(player);
         await tester.pumpWidget(MaterialApp(home: Scaffold(body: Video(controller: controller))));
-        if (plan!.decryptionKey.isNotEmpty && player.platform is NativePlayer) {
-          await (player.platform as NativePlayer).setProperty('demuxer-lavf-o', 'decryption_key=${plan.decryptionKey}');
+        if (player.platform is NativePlayer) {
+          await (player.platform as NativePlayer).setProperty('demuxer-lavf-o', [
+            'protocol_whitelist=[file,crypto,data]',
+            'allowed_extensions=ALL',
+            if (plan!.decryptionKey.isNotEmpty) 'decryption_key=${plan.decryptionKey}',
+          ].join(','));
         }
         await player.setVolume(0);
-        await player.open(Media(plan.url, httpHeaders: plan.headers));
+        await player.open(Media(plan!.url, httpHeaders: plan.headers));
         await until(() => (player.state.width ?? 0) > 0 && player.state.position.inMilliseconds > 500, 'offline decode ${episode.number}');
         await tester.pumpWidget(const SizedBox.shrink());
         await player.dispose();
