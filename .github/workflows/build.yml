@@ -15,6 +15,7 @@ concurrency:
 env:
   GOPROXY: https://proxy.golang.org,direct
   GOSUMDB: sum.golang.org
+  PYTHONUTF8: '1'
 
 jobs:
   checks:

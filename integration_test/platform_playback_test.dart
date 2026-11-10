@@ -62,7 +62,16 @@ void main() {
       final executor = FFmpegExecutor();
       final output = '${temporary.path}/remuxed.mkv';
       const base = String.fromEnvironment('FIXTURE_BASE_URL');
-      await executor.run(['-i', '$base/clear.mp4', '-map', '0', '-c', 'copy', output]);
+      final input = File('${temporary.path}/clear.mp4');
+      final client = HttpClient();
+      try {
+        final response = await (await client.getUrl(Uri.parse('$base/clear.mp4'))).close();
+        if (response.statusCode != 200) fail('Fixture download failed');
+        await response.pipe(input.openWrite());
+      } finally {
+        client.close(force: true);
+      }
+      await executor.run(['-i', input.path, '-map', '0', '-c', 'copy', output]);
       verifyMediaDuration(await executor.probe(output), 20);
     } finally {
       await temporary.delete(recursive: true);
