@@ -7,13 +7,56 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
 var nativeDownloadAttributes = regexp.MustCompile(`([A-Z0-9-]+)=("[^"]*"|[^,]*)`)
+
+func nativeWindowsPlaybackPlaylist(filename string, depth int) (string, error) {
+	if depth > 8 {
+		return "", errNativeLocalFile
+	}
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return "", err
+	}
+	rewrite := func(reference string) (string, error) {
+		target := filepath.Join(filepath.Dir(filename), reference)
+		if filepath.Ext(target) == ".m3u8" {
+			var err error
+			target, err = nativeWindowsPlaybackPlaylist(target, depth+1)
+			if err != nil {
+				return "", err
+			}
+		}
+		return "file:" + filepath.ToSlash(target), nil
+	}
+	lines := strings.Split(string(data), "\n")
+	for index, line := range lines {
+		if text := strings.TrimSpace(line); text != "" && !strings.HasPrefix(text, "#") {
+			lines[index], err = rewrite(text)
+		} else {
+			for _, match := range nativePlaylistURI.FindAllStringSubmatch(line, -1) {
+				var target string
+				target, err = rewrite(match[1])
+				if err != nil {
+					break
+				}
+				lines[index] = strings.ReplaceAll(lines[index], match[0], "URI=\""+target+"\"")
+			}
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	output := filepath.Join(filepath.Dir(filename), "playback-"+filepath.Base(filename))
+	return output, nativeDownloadWrite(output, []byte(strings.Join(lines, "\n")))
+}
 
 func nativeHLSAttributes(line string) map[string]string {
 	result := map[string]string{}

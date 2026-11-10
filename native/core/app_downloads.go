@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -561,6 +562,13 @@ func (manager *nativeDownloads) localPlan(drama string, index int) (nativePlan, 
 		record.Archived = false
 		_ = manager.saveLocked()
 		return nativePlan{}, true, errNativeLocalFile
+	}
+	if runtime.GOOS == "windows" && filepath.Ext(path) == ".m3u8" {
+		var err error
+		path, err = nativeWindowsPlaybackPlaylist(path, 0)
+		if err != nil {
+			return nativePlan{}, true, err
+		}
 	}
 	return nativePlan{URL: path, Key: record.Key, Local: true, Quality: record.ActualQuality,
 		Qualities: []int{}, Headers: map[string]string{}, RouteCount: 1}, true, nil

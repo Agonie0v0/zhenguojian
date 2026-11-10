@@ -22,6 +22,8 @@ void main() {
     final store = LocalStore(await SharedPreferences.getInstance());
     final detail = await repository.detail(DeviceFixtureRepository.drama);
     final samples = <Map<String, Object?>>[];
+    final evidence = <String, Object?>{'platform': Platform.operatingSystem, 'decodedSamples': samples, 'stage': 'online'};
+    binding.reportData = evidence;
     await store.toggleFavorite(detail.drama);
     expect(store.isFavorite(detail.drama.id), isTrue);
     expect(LocalStore(await SharedPreferences.getInstance()).isFavorite(detail.drama.id), isTrue);
@@ -106,9 +108,13 @@ void main() {
     await fixtureControl('offline');
     try {
       for (final episode in detail.episodes) {
+        evidence['stage'] = 'offline decode ${episode.number}';
         final plan = await downloads.localPlayback(detail.drama, episode);
         expect(plan, isNotNull);
         final player = Player();
+        final errors = <String>[];
+        final errorSubscription = player.stream.error.listen(errors.add);
+        evidence['playerErrors'] = errors;
         final controller = VideoController(player);
         await tester.pumpWidget(MaterialApp(home: Scaffold(body: Video(controller: controller))));
         if (player.platform is NativePlayer) {
@@ -121,6 +127,7 @@ void main() {
         await player.setVolume(0);
         await player.open(Media(plan!.url, httpHeaders: plan.headers));
         await until(() => (player.state.width ?? 0) > 0 && player.state.position.inMilliseconds > 500, 'offline decode ${episode.number}');
+        await errorSubscription.cancel();
         await tester.pumpWidget(const SizedBox.shrink());
         await player.dispose();
       }

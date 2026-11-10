@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -61,6 +62,9 @@ func TestNativeDownloadedEncryptedHLSDecodesWithSourceOffline(t *testing.T) {
 		t.Fatalf("offline plan: %+v %v", plan, err)
 	}
 	upstream.Close()
+	if runtime.GOOS == "windows" {
+		plan.URL = `\\?\` + plan.URL
+	}
 	decode := exec.CommandContext(ctx, ffmpeg, "-v", "error",
 		"-protocol_whitelist", "file,crypto,data", "-allowed_extensions", "ALL",
 		"-i", plan.URL, "-f", "null", "-")

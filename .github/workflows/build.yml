@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: platform-build-${{ github.ref }}
-  cancel-in-progress: true
+  group: platform-build-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   GOPROXY: https://proxy.golang.org,direct
@@ -100,7 +100,7 @@ jobs:
 
   ios:
     needs: checks
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
