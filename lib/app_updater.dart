@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'app_layout.dart';
 import 'markdown_lite.dart';
@@ -107,7 +108,11 @@ class AppUpdater {
   /// 与启动检查的区别：不读取“今天已提示过”的记录，用户主动触发就必须给结果。
   static Future<void> checkManually(BuildContext context) async {
     if (!_supported) {
-      _toast(context, '当前平台暂不支持应用内更新');
+      final opened = await launchUrl(
+        Uri.parse('https://github.com/Agonie0v0/zhenguojian/releases/latest'),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && context.mounted) _toast(context, '无法打开更新下载页');
       return;
     }
     final progress = ValueNotifier<String>('正在检查更新…');

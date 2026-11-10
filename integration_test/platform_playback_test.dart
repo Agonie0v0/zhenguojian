@@ -10,7 +10,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'playback_test.dart' show DeviceFixtureRepository;
+import 'playback_test.dart' show DeviceFixtureRepository, DownloadFixtureRepository, fixtureControl;
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +22,9 @@ void main() {
     final store = LocalStore(await SharedPreferences.getInstance());
     final detail = await repository.detail(DeviceFixtureRepository.drama);
     final samples = <Map<String, Object?>>[];
+    await store.toggleFavorite(detail.drama);
+    expect(store.isFavorite(detail.drama.id), isTrue);
+    expect(LocalStore(await SharedPreferences.getInstance()).isFavorite(detail.drama.id), isTrue);
 
     Future<void> until(bool Function() ready, String label) async {
       final timer = Stopwatch()..start();
@@ -72,9 +75,45 @@ void main() {
     await tester.fling(find.byType(Video).first, const Offset(0, -300), 1200);
     await until(() => repository.resolved.last == 2 && (feedPlayer().state.width ?? 0) > 0, 'swipe to episode 2');
     expect(tester.takeException(), isNull);
-    binding.reportData = {'platform': Platform.operatingSystem, 'decodedSamples': samples, 'remux': true, 'feedSwipe': true};
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
+
+    final downloads = DownloadFixtureRepository();
+    await downloads.initialize();
+    await fixtureControl('online');
+    await downloads.controlDownloads('deleteAll');
+    expect(await downloads.enqueueDownloads(detail, detail.episodes), 3);
+    var completed = false;
+    final downloadTimer = Stopwatch()..start();
+    while (!completed) {
+      final jobs = await downloads.downloads();
+      if (jobs.any((job) => job.state == 'failed')) fail('Download failed: ${jobs.map((job) => job.error).join('; ')}');
+      completed = jobs.length == 3 && jobs.every((job) => job.completed);
+      if (downloadTimer.elapsed > const Duration(seconds: 90)) fail('Download timeout');
+      await tester.pump(const Duration(milliseconds: 250));
+    }
+    await fixtureControl('offline');
+    try {
+      for (final episode in detail.episodes) {
+        final plan = await downloads.localPlayback(detail.drama, episode);
+        expect(plan, isNotNull);
+        final player = Player();
+        final controller = VideoController(player);
+        await tester.pumpWidget(MaterialApp(home: Scaffold(body: Video(controller: controller))));
+        if (plan!.decryptionKey.isNotEmpty && player.platform is NativePlayer) {
+          await (player.platform as NativePlayer).setProperty('demuxer-lavf-o', 'decryption_key=${plan.decryptionKey}');
+        }
+        await player.setVolume(0);
+        await player.open(Media(plan.url, httpHeaders: plan.headers));
+        await until(() => (player.state.width ?? 0) > 0 && player.state.position.inMilliseconds > 500, 'offline decode ${episode.number}');
+        await tester.pumpWidget(const SizedBox.shrink());
+        await player.dispose();
+      }
+    } finally {
+      await fixtureControl('online');
+      await downloads.controlDownloads('deleteAll');
+    }
+    binding.reportData = {'platform': Platform.operatingSystem, 'decodedSamples': samples, 'remux': true, 'feedSwipe': true, 'offlineDownloads': true, 'favoritesPersisted': true};
     store.dispose();
   });
 }

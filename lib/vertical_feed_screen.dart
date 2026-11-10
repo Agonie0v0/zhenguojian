@@ -1464,7 +1464,8 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
 
   /// 当前窗口亮度比例（0.7.8）。窗口亮度**覆盖**系统亮度，
   /// 因此系统调暗时 App 内仍可调亮（上限是屏幕硬件最亮）。
-  double _screenBrightnessRatio = .5;
+  double _screenBrightnessRatio =
+      defaultTargetPlatform == TargetPlatform.windows ? 1 : .5;
 
   /// 「自动连播切到了下一集」进行中（0.7.2，`XQ-0104`）。
   ///
@@ -3377,7 +3378,16 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
   );
 
   /// 亮度不再用画面滤镜（0.7.8）：改调窗口亮度，滤镜层直接透传。
-  Widget _applyBrightness(Widget child) => child;
+  Widget _applyBrightness(Widget child) {
+    if (defaultTargetPlatform != TargetPlatform.windows) return child;
+    return ColorFiltered(
+      colorFilter: ColorFilter.mode(
+        Colors.black.withValues(alpha: 1 - _screenBrightnessRatio),
+        BlendMode.srcATop,
+      ),
+      child: child,
+    );
+  }
 
   Future<void> _setSpeed(double value) async {
     if (_closed) return;
@@ -4087,6 +4097,7 @@ class _FeedPageState extends State<_FeedPage> with WidgetsBindingObserver {
 
   void _setBrightness(double value) {
     _screenBrightnessRatio = value;
+    if (defaultTargetPlatform == TargetPlatform.windows) setState(() {});
     unawaited(ScreenBrightness.set(value));
     _interactions?.hint('亮度 ${(value * 100).round()}%');
   }

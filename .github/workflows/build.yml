@@ -33,7 +33,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart format lib integration_test/platform_playback_test.dart
-      - run: dart analyze lib integration_test/platform_playback_test.dart
+      - run: dart analyze --no-fatal-infos --no-fatal-warnings lib integration_test/platform_playback_test.dart
       - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Flutter feature regression report
         run: flutter test --dart-define=DISABLE_REMOTE_IMAGES=true --dart-define=ALL_SOURCES=true

@@ -1,8 +1,8 @@
 #ifndef AppVersion
-  #define AppVersion "0.7.17"
+  #define AppVersion "0.7.19"
 #endif
 #ifndef AppBuild
-  #define AppBuild "77"
+  #define AppBuild "79"
 #endif
 #define AppName "真果鉴"
 #define BundleDir SourcePath + "..\build\windows\x64\runner\Release"
@@ -16,8 +16,8 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=真果鉴开源项目
-AppPublisherURL=https://github.com/kuoluoss/zhenguojian
-AppSupportURL=https://github.com/kuoluoss/zhenguojian/issues
+AppPublisherURL=https://github.com/Agonie0v0/zhenguojian
+AppSupportURL=https://github.com/Agonie0v0/zhenguojian/issues
 VersionInfoVersion={#AppVersion}.{#AppBuild}
 DefaultDirName={localappdata}\Programs\Zhenguojian
 DefaultGroupName={#AppName}

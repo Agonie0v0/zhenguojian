@@ -1,8 +1,12 @@
 # 真果鉴
 
-多站源短剧浏览与在线播放应用，Android 手机版。基于开源项目 [Topkill/guoapp3](https://github.com/Topkill/guoapp3) 二次开发与改版。
+本仓库复刻 [kuoluoss/zhenguojian](https://github.com/kuoluoss/zhenguojian)，同步其 0.7.18 源码，恢复 iOS / Windows 构建与验证，保留原版全站源、发现、搜索、推荐、追剧、下载、合并、Emby 导出、局域网与用户权限功能。
 
-当前版本：**0.7.18+78** ｜ 平台：Android 8.0+（arm64-v8a） ｜ [下载最新版](https://github.com/kuoluoss/zhenguojian/releases/latest)
+当前开发版本：**0.7.19+79** ｜ [本仓库构建记录](https://github.com/Agonie0v0/zhenguojian/actions) ｜ [iOS / Windows 下载](https://github.com/Agonie0v0/zhenguojian/releases/latest)
+
+本仓库新增 Windows 安装程序和免安装 ZIP、iOS 未签名 IPA；IPA 安装前需要用户自行签名。Windows 保留键盘快捷键、窗口全屏和备用媒体线路，音量手势改用播放器音量，亮度手势调整视频画面。iOS 增加亮度恢复和蜂窝网络识别，音量手势使用播放器音量。手动检查更新会打开本仓库下载页；iOS 系统不提供 Android 的持续后台服务，应用进入后台时暂停媒体处理和下载。
+
+CI 将真实原生播放器对合成 MP4、AES HLS、CENC 的视频解码、进度拖动、暂停、倍速、应用内切集、离线下载播放、FFmpeg 转封装和收藏持久化设为发布门槛。完整 Flutter / Go 回归另行保留报告；已有失败不应被描述为全部功能验收通过。真实站源随网络与接口变化，iOS 真机、局域网双端和所有功能仍需设备验收；下方保留上游 Android 使用说明，不能作为本仓库平台已通过验收的证据。
 
 ---
 
