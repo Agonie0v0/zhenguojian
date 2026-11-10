@@ -33,7 +33,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart format lib integration_test/platform_playback_test.dart
-      - run: dart analyze --no-fatal-infos --no-fatal-warnings lib integration_test/platform_playback_test.dart
+      - run: dart analyze --no-fatal-warnings lib integration_test/platform_playback_test.dart
       - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Flutter feature regression report
         run: flutter test --dart-define=DISABLE_REMOTE_IMAGES=true --dart-define=ALL_SOURCES=true
@@ -84,6 +84,9 @@ jobs:
           $version = (Select-String pubspec.yaml -Pattern '^version:\s*(\S+)').Matches.Groups[1].Value -split '\+'
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$($version[0])" "/DAppBuild=$($version[1])" scripts/windows_installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
+      - name: Report live source playback
+        if: always()
+        run: python scripts/smoke_sources.py --report-only
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -91,6 +94,7 @@ jobs:
           path: |
             dist/windows/*
             build/windows-package-smoke.json
+            build/source-playback.json
             build/device-test/results/*
 
   ios:

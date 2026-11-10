@@ -36,6 +36,10 @@ Future<void> main(List<String> arguments) async {
     await runPackageSmoke(arguments);
     return;
   }
+  if (Platform.isWindows && arguments.firstOrNull == '--source-smoke') {
+    await runSourceSmoke(arguments);
+    return;
+  }
   runApp(const AppBootstrap());
 }
 
