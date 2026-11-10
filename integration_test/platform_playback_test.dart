@@ -81,7 +81,9 @@ void main() {
     final downloads = DownloadFixtureRepository();
     await downloads.initialize();
     await fixtureControl('online');
-    await downloads.controlDownloads('deleteAll');
+    for (final job in await downloads.downloads()) {
+      if (job.drama.id == detail.drama.id) await downloads.controlDownloads('remove', id: job.id);
+    }
     expect(await downloads.enqueueDownloads(detail, detail.episodes), 3);
     var completed = false;
     final downloadTimer = Stopwatch()..start();
@@ -111,7 +113,9 @@ void main() {
       }
     } finally {
       await fixtureControl('online');
-      await downloads.controlDownloads('deleteAll');
+      for (final job in await downloads.downloads()) {
+        if (job.drama.id == detail.drama.id) await downloads.controlDownloads('remove', id: job.id);
+      }
     }
     binding.reportData = {'platform': Platform.operatingSystem, 'decodedSamples': samples, 'remux': true, 'feedSwipe': true, 'offlineDownloads': true, 'favoritesPersisted': true};
     store.dispose();
