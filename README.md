@@ -4,6 +4,8 @@
 
 当前开发版本：**0.7.21+81** ｜ [本仓库构建记录](https://github.com/Agonie0v0/zhenguojian/actions) ｜ [iOS / Windows 下载](https://github.com/Agonie0v0/zhenguojian/releases/latest)
 
+按用户 2026-11-11 的要求，红果不可播放作为已知问题保留，不阻止仓库构建与发布 Windows 安装程序、免安装 ZIP 和 iOS 未签名 IPA。真实源检测仍上传报告；原生播放器、合成媒体播放与安装包构建检查继续执行。IPA 安装前需自行签名，构建成功不代表红果已恢复或 iOS 已完成真机验收。
+
 0.7.21 红果兼容性开发快照：优先尝试签名 GET `/reading/bookapi/video_tab/multi_video_model/v1/`，使用 7.3.9.32 播放参数，对无请求体签名，不携带 POST 正文摘要；支持 `data.video_model_data[所选分集].video_model`，保留旧接口后备。协议形态参考 [hongguo-drama PR #133](https://github.com/jackotom/hongguo-drama/pull/133) 与 [hongguoTV](https://github.com/N3urda/hongguoTV/blob/main/kotlin-tv/core/src/main/kotlin/com/hongguotv/core/ContentRepository.kt)，沿用现有 Go 签名实现，未引入外部服务或依赖。仅匹配指定分集，缺失、错误码、无效模型和空正文均报错。
 
 2026-11-11 本机新旧接口、注册身份、直连/系统代理、Go/Node 客户端及公开实现的请求形态对照均出现 HTTP 200 空正文，真实红果播放仍未通过。社区当天 [issue #139](https://github.com/jackotom/hongguo-drama/issues/139) 也反馈新接口空响应；该反馈只能作为旁证，不能证明本机失败一定属于限流。网页公开 MP4 实测仅 10.08 秒，而分集元数据为 114.006 秒，因此未将试看地址接入正片播放。新接口的请求结构、签名分支、版本参数、精确分集解析和失败响应回归已通过；本快照不标注为“红果已修复”，使用 unverified tag。
