@@ -1,8 +1,8 @@
 #ifndef AppVersion
-  #define AppVersion "0.7.20"
+  #define AppVersion "0.7.21"
 #endif
 #ifndef AppBuild
-  #define AppBuild "80"
+  #define AppBuild "81"
 #endif
 #define AppName "真果鉴"
 #define BundleDir SourcePath + "..\build\windows\x64\runner\Release"

@@ -40,6 +40,7 @@ type hongguoPlaybackPreference struct {
 }
 
 const (
+	hongguoPlaybackModeSignedTab          = "signed-tab-registered"
 	hongguoPlaybackModeSignedRegistered   = "signed-registered"
 	hongguoPlaybackModeUnsignedRegistered = "unsigned-registered"
 	hongguoPlaybackModeSignedSynthetic    = "signed-synthetic"
@@ -135,10 +136,28 @@ func (downloader *Downloader) hongguoPlaybackCandidateOrder() []hongguoPlaybackC
 		}
 	}
 	order := make([]hongguoPlaybackCandidate, 0, len(base))
+	if preferred.Mode == hongguoPlaybackModeSignedTab {
+		for _, host := range hosts {
+			if host == preferred.Host {
+				order = append(order, hongguoPlaybackCandidate{hongguoPlaybackModeSignedTab, host})
+			}
+		}
+	}
+	for _, host := range hosts {
+		if preferred.Mode == hongguoPlaybackModeSignedTab && host == preferred.Host {
+			continue
+		}
+		order = append(order, hongguoPlaybackCandidate{hongguoPlaybackModeSignedTab, host})
+	}
 	if preferred.Mode != "" {
-		order = append(order, hongguoPlaybackCandidate{preferred.Mode, preferred.Host})
+		if preferred.Mode != hongguoPlaybackModeSignedTab {
+			order = append(order, hongguoPlaybackCandidate{preferred.Mode, preferred.Host})
+		}
 	}
 	for _, candidate := range base {
+		if candidate.mode == hongguoPlaybackModeSignedTab {
+			continue
+		}
 		if candidate.mode == preferred.Mode && candidate.host == preferred.Host {
 			continue
 		}
@@ -193,6 +212,13 @@ func (downloader *Downloader) hongguoPlaybackAttempt(ctx context.Context, candid
 	deviceID, installID, err := downloader.hongguoPlaybackIdentity(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if candidate.mode == hongguoPlaybackModeSignedTab {
+		request, err := newHongguoTabPlaybackRequest(ctx, candidate.host, deviceID, installID, videoID, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		return downloader.hongguoPlaybackResponse(request, videoID)
 	}
 	signed := candidate.mode == hongguoPlaybackModeSignedRegistered
 	return downloader.hongguoPlaybackCall(ctx, candidate.host, deviceID, installID, videoID, signed)
@@ -253,6 +279,10 @@ func (downloader *Downloader) hongguoPlaybackCall(ctx context.Context, host, dev
 		request.Header.Set("x-tt-store-region-src", "did")
 	}
 
+	return downloader.hongguoPlaybackResponse(request, videoID)
+}
+
+func (downloader *Downloader) hongguoPlaybackResponse(request *http.Request, videoID string) (map[string]any, error) {
 	response, err := downloader.doPreparedCatalogRequest(request, 15*time.Second, nil)
 	if err != nil {
 		return nil, err
@@ -268,6 +298,9 @@ func (downloader *Downloader) hongguoPlaybackCall(ctx context.Context, host, dev
 	if len(content) == 0 {
 		return nil, errors.New("红果播放接口未返回数据")
 	}
+	if len(content) > providerMaxBodyBytes {
+		return nil, errors.New("红果播放接口响应过大")
+	}
 	var parsed map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.UseNumber()
@@ -277,7 +310,11 @@ func (downloader *Downloader) hongguoPlaybackCall(ctx context.Context, host, dev
 	if code := mapString(parsed, "code", "Code"); code != "" && code != "0" {
 		return nil, fmt.Errorf("红果播放接口暂不可用（%s）", truncate(code, 20))
 	}
-	entry := nestedMap(nestedMap(parsed, "data"), videoID)
+	data := nestedMap(parsed, "data")
+	if entries, ok := data["video_model_data"].(map[string]any); ok {
+		data = entries
+	}
+	entry := nestedMap(data, videoID)
 	model := hongguoVideoModel(entry["video_model"])
 	if len(model) == 0 {
 		return nil, errors.New("红果播放接口未返回该集片源")
@@ -296,6 +333,10 @@ func hongguoPlaybackQuery(deviceID, installID string, khronos, ticket int64) str
 	if versionName == "" {
 		versionName = defaultUpstreamConfig().VersionName
 	}
+	return hongguoPlaybackVersionQuery(deviceID, installID, versionCode, versionName, khronos, ticket, nil)
+}
+
+func hongguoPlaybackVersionQuery(deviceID, installID, versionCode, versionName string, khronos, ticket int64, extra [][2]string) string {
 	fields := [][2]string{
 		{"ac", "wifi"}, {"channel", "update_64"}, {"aid", "8662"}, {"app_name", "novelread"},
 		{"version_code", versionCode}, {"version_name", versionName}, {"device_platform", "android"},
@@ -306,12 +347,51 @@ func hongguoPlaybackQuery(deviceID, installID string, khronos, ticket int64) str
 		{"compliance_status", "0"}, {"need_personal_recommend", "1"}, {"player_so_load", "1"},
 		{"is_android_pad_screen", "0"},
 		{"device_id", deviceID}, {"iid", installID},
-		{"ts", strconv.FormatInt(khronos, 10)},
-		{"_rticket", strconv.FormatInt(ticket, 10)},
 	}
+	fields = append(fields, extra...)
+	fields = append(fields, [2]string{"ts", strconv.FormatInt(khronos, 10)}, [2]string{"_rticket", strconv.FormatInt(ticket, 10)})
 	parts := make([]string, 0, len(fields))
 	for _, field := range fields {
 		parts = append(parts, urlQueryEscape(field[0])+"="+urlQueryEscape(field[1]))
 	}
 	return strings.Join(parts, "&")
+}
+
+func newHongguoTabPlaybackRequest(ctx context.Context, host, deviceID, installID, videoID string, now time.Time) (*http.Request, error) {
+	if !hongguoNumericID.MatchString(videoID) {
+		return nil, errors.New("红果视频 ID 无效")
+	}
+	extra := [][2]string{
+		{"video_id", videoID}, {"video_id_type", "0"}, {"device_level", "1"},
+		{"need_all_video_definition", "1"}, {"need_mp4_align", "0"}, {"use_os_player", "0"},
+		{"video_platform", "1024"}, {"source", "0"}, {"from_video_id", ""},
+	}
+	for offset := int64(0); offset < 128; offset++ {
+		ticket := now.UnixMilli() + offset
+		target := "https://" + host + "/reading/bookapi/video_tab/multi_video_model/v1/?" +
+			hongguoPlaybackVersionQuery(deviceID, installID, "73932", "7.3.9.32", now.Unix(), ticket, extra)
+		if sign6.BranchOf(target, nil, now.Unix()) != 0 {
+			continue
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)")
+		request.Header.Set("Accept", "application/json; charset=utf-8,application/x-protobuf")
+		request.Header.Set("x-ss-req-ticket", strconv.FormatInt(ticket, 10))
+		request.Header.Set("sdk-version", "2")
+		request.Header.Set("x-xs-from-web", "0")
+		request.Header.Set("passport-sdk-version", "50561")
+		request.Header.Set("x-ss-dp", "8662")
+		request.Header.Set("x-tt-dt", "")
+		request.Header.Set("x-tt-store-region", "cn")
+		request.Header.Set("x-tt-store-region-src", "did")
+		request.Header.Set("x-tt-request-tag", "t=0;n=0")
+		for key, value := range sign6.Sign(target, nil, now.Unix()) {
+			request.Header.Set(key, value)
+		}
+		return request, nil
+	}
+	return nil, errors.New("红果播放请求无法生成签名")
 }

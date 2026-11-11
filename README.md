@@ -2,7 +2,13 @@
 
 本仓库复刻 [kuoluoss/zhenguojian](https://github.com/kuoluoss/zhenguojian)，同步其 0.7.18 源码，恢复 iOS / Windows 构建与验证，保留原版全站源、发现、搜索、推荐、追剧、下载、合并、Emby 导出、局域网与用户权限功能。
 
-当前开发版本：**0.7.20+80** ｜ [本仓库构建记录](https://github.com/Agonie0v0/zhenguojian/actions) ｜ [iOS / Windows 下载](https://github.com/Agonie0v0/zhenguojian/releases/latest)
+当前开发版本：**0.7.21+81** ｜ [本仓库构建记录](https://github.com/Agonie0v0/zhenguojian/actions) ｜ [iOS / Windows 下载](https://github.com/Agonie0v0/zhenguojian/releases/latest)
+
+0.7.21 红果兼容性开发快照：优先尝试签名 GET `/reading/bookapi/video_tab/multi_video_model/v1/`，使用 7.3.9.32 播放参数，对无请求体签名，不携带 POST 正文摘要；支持 `data.video_model_data[所选分集].video_model`，保留旧接口后备。协议形态参考 [hongguo-drama PR #133](https://github.com/jackotom/hongguo-drama/pull/133) 与 [hongguoTV](https://github.com/N3urda/hongguoTV/blob/main/kotlin-tv/core/src/main/kotlin/com/hongguotv/core/ContentRepository.kt)，沿用现有 Go 签名实现，未引入外部服务或依赖。仅匹配指定分集，缺失、错误码、无效模型和空正文均报错。
+
+2026-11-11 本机新旧接口、注册身份、直连/系统代理、Go/Node 客户端及公开实现的请求形态对照均出现 HTTP 200 空正文，真实红果播放仍未通过。社区当天 [issue #139](https://github.com/jackotom/hongguo-drama/issues/139) 也反馈新接口空响应；该反馈只能作为旁证，不能证明本机失败一定属于限流。网页公开 MP4 实测仅 10.08 秒，而分集元数据为 114.006 秒，因此未将试看地址接入正片播放。新接口的请求结构、签名分支、版本参数、精确分集解析和失败响应回归已通过；本快照不标注为“红果已修复”，使用 unverified tag。
+
+0.7.21 Windows 实包检查：原生核心、FFprobe、FFmpeg 转封装和 media_kit 播放通过；安装后 61 个文件与 Release 构建逐一校验一致，安装与卸载返回成功。实包红果目录 52 条、抽样剧集 116 集，失败于 resolve 阶段；同包黄豆抽样解码 720×1280 并跳转到 5 秒通过。红果/黄豆相关 Go 回归及 sign6 测试、Go vet 通过；Python 18 项检查中 17 项通过、1 项跳过。未重复执行上一版的完整应用内集成测试，也未重建或验证 iOS。
 
 2026-11-11 排查：黄豆主域 tideember.cc 无法解析，旧备用 xqjurgek.top 的证书于 11 月 6 日过期；改用证书有效且兼容现有接口的 dptewvxi.top，保留旧入口作为后备，修复已记忆旧域名无法切换的问题。保持 TLS 证书校验。新 Windows Release ZIP 已通过启动、FFprobe、FFmpeg 转封装和播放器基础检查；安装程序安装后 61 个文件逐一校验一致，安装与卸载均成功。真实站源抽样中黄豆、黄剧、黄果剧场和旧源均取得视频尺寸、解码并跳转至 5 秒；红果、黄果 AI 未通过取流，不能视为全部站源可用。
 
