@@ -99,7 +99,7 @@ func canonicalProviderSource(source string) string {
 		return sourceHuangguoAI
 	case "huangguo-video", "huangguo.video", "huangguoai.fit":
 		return sourceHuangguoVideo
-	case "huangdou", "tideember.cc", "xqjurgek.top":
+	case "huangdou", "tideember.cc", "xqjurgek.top", "dptewvxi.top":
 		return sourceHuangdou
 	case "hongguo", "hongguoduanju.com":
 		return sourceHongguo

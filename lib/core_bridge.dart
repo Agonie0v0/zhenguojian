@@ -142,6 +142,7 @@ abstract class AppRepository {
   bool get supportsSourceManagement => false;
   Future<SourceStatus> sourceStatus(String source) async =>
       SourceStatus.fromJson({'source': source});
+
   /// 下发红果上游参数（远程配置）。核心会校验并持久化。
   Future<void> applyUpstreamConfig(String text);
 
@@ -216,8 +217,9 @@ abstract class AppRepository {
 
 class NativeRepository extends AppRepository {
   static final _coverDecoder = CoverDecoder();
-  NativeRepository({this.background = false});
+  NativeRepository({this.background = false, this.directory});
   final bool background;
+  final Directory? directory;
   LocalStore? access;
   final _readOwner = DateTime.now().microsecondsSinceEpoch.toString();
   int _readSequence = 0;
@@ -671,7 +673,7 @@ class NativeRepository extends AppRepository {
 
   @override
   Future<void> initialize() async {
-    final directory = await getApplicationSupportDirectory();
+    final directory = this.directory ?? await getApplicationSupportDirectory();
     final build = await _call({
       'action': 'initialize',
       'directory': directory.path,
@@ -865,7 +867,7 @@ class NativeRepository extends AppRepository {
       if (dir == null) {
         if (_detailDiskLoaded) return null;
         _detailDiskLoaded = true;
-        final support = await getApplicationSupportDirectory();
+        final support = directory ?? await getApplicationSupportDirectory();
         dir = Directory('${support.path}${Platform.pathSeparator}detail_cache');
         if (!await dir.exists()) await dir.create(recursive: true);
         _detailCacheDir = dir;

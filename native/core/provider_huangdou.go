@@ -16,13 +16,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	huangdouBaseURL     = "https://tideember.cc"
+	huangdouBaseURL     = "https://dptewvxi.top"
 	huangdouVersion     = "2.0.0"
 	huangdouDeviceType  = "web"
 	huangdouPlatformKey = "7961beb44246e3012ce228d6b5ced05a"
@@ -137,9 +138,17 @@ func (d *Downloader) resolveHuangdouPlayback(ctx context.Context, client *huangd
 }
 
 func (c *huangdouAPIClient) call(ctx context.Context, path string, data map[string]any, out *any) error {
+	hosts := []string{c.host}
+	if c.d.cfg.HuangdouURL == "" {
+		for _, host := range []string{huangdouBaseURL, "https://tideember.cc", "https://xqjurgek.top"} {
+			if !slices.Contains(hosts, host) {
+				hosts = append(hosts, host)
+			}
+		}
+	}
 	retries := c.d.cfg.Retries
-	if retries < 1 {
-		retries = 1
+	if retries < len(hosts) {
+		retries = len(hosts)
 	}
 	var lastErr error
 	for attempt := 0; attempt < retries; attempt++ {
@@ -161,8 +170,8 @@ func (c *huangdouAPIClient) call(ctx context.Context, path string, data map[stri
 		if errors.As(lastErr, &apiErr) {
 			return lastErr
 		}
-		if c.host == huangdouBaseURL && c.d.cfg.HuangdouURL == "" {
-			c.host = "https://xqjurgek.top"
+		if attempt+1 < len(hosts) {
+			c.host = hosts[attempt+1]
 		}
 	}
 	return lastErr

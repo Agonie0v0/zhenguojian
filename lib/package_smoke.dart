@@ -9,50 +9,121 @@ import 'models.dart';
 import 'upstream_config.dart';
 
 Future<void> runSourceSmoke(List<String> arguments) async {
-  if (arguments.length != 2) exit(2);
+  if (arguments.length < 2) exit(2);
   final report = File(arguments[1]);
-  final repository = NativeRepository();
+  final directory = await Directory.systemTemp.createTemp('zgj-source-data-');
+  final repository = NativeRepository(background: true, directory: directory);
   final sources = <Map<String, Object?>>[];
   try {
     await repository.initialize();
     await refreshUpstreamConfig(repository);
-    for (final source in SourceSite.values) {
+    final selected = arguments.skip(2).toSet();
+    if (selected.any((id) => !SourceSite.isAvailable(id))) {
+      throw ArgumentError('Unknown source');
+    }
+    for (final source in SourceSite.values.where(
+      (source) => selected.isEmpty || selected.contains(source.id),
+    )) {
       Player? player;
       PlaybackPlan? plan;
-      final evidence = <String, Object?>{'source': source.id, 'ok': false};
+      final timer = Stopwatch()..start();
+      final evidence = <String, Object?>{
+        'source': source.id,
+        'ok': false,
+        'stage': 'catalog',
+      };
       try {
-        final catalog = await repository.catalog(source.id).timeout(const Duration(seconds: 40));
+        final catalog = await repository
+            .catalog(source.id, force: true)
+            .timeout(const Duration(seconds: 65));
         if (catalog.items.isEmpty) throw StateError('Source catalog is empty');
-        final detail = await repository.detail(catalog.items.first).timeout(const Duration(seconds: 30));
-        if (detail.episodes.isEmpty) throw StateError('Source has no playable episodes');
-        plan = await repository.resolve(detail.drama, detail.episodes.first).timeout(const Duration(seconds: 50));
-        player = Player(configuration: const PlayerConfiguration(muted: true, vo: 'null'));
+        evidence['catalogCount'] = catalog.items.length;
+        evidence['stage'] = 'detail';
+        final drama = catalog.items.firstWhere(
+          (item) => item.vip != true,
+          orElse: () => catalog.items.first,
+        );
+        final detail = await repository
+            .detail(drama)
+            .timeout(const Duration(seconds: 65));
+        if (detail.episodes.isEmpty) {
+          throw StateError('Source has no playable episodes');
+        }
+        final episode = detail.episodes.firstWhere(
+          (item) => !item.vip,
+          orElse: () => throw StateError('No free episode'),
+        );
+        evidence.addAll({
+          'dramaId': detail.drama.id,
+          'episode': episode.number,
+          'episodeCount': detail.episodes.length,
+          'stage': 'resolve',
+        });
+        plan = await repository
+            .resolve(detail.drama, episode)
+            .timeout(const Duration(seconds: 65));
+        evidence['stage'] = 'decode';
+        player = Player(
+          configuration: const PlayerConfiguration(muted: true, vo: 'null'),
+        );
         await player.setAudioTrack(AudioTrack.no());
         await player.setVideoTrack(VideoTrack.auto());
         if (plan.decryptionKey.isNotEmpty && player.platform is NativePlayer) {
-          await (player.platform as NativePlayer).setProperty('demuxer-lavf-o', 'decryption_key=${plan.decryptionKey}');
+          await (player.platform as NativePlayer).setProperty(
+            'demuxer-lavf-o',
+            'decryption_key=${plan.decryptionKey}',
+          );
         }
         await player.open(Media(plan.url, httpHeaders: plan.headers));
-        final timer = Stopwatch()..start();
-        while (player.state.position.inMilliseconds < 500 || (player.state.width ?? 0) <= 0) {
-          if (timer.elapsed > const Duration(seconds: 25)) throw StateError('Video did not decode');
+        final decodeTimer = Stopwatch()..start();
+        while (player.state.position.inMilliseconds < 500 ||
+            (player.state.width ?? 0) <= 0) {
+          if (decodeTimer.elapsed > const Duration(seconds: 30)) {
+            throw StateError('Video did not decode');
+          }
           await Future<void>.delayed(const Duration(milliseconds: 200));
         }
-        evidence.addAll({'ok': true, 'width': player.state.width, 'height': player.state.height, 'positionMs': player.state.position.inMilliseconds});
+        await player.seek(const Duration(seconds: 5));
+        final seekTimer = Stopwatch()..start();
+        while (player.state.position.inSeconds < 5) {
+          if (seekTimer.elapsed > const Duration(seconds: 20)) {
+            throw StateError('Video did not seek');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+        evidence.addAll({
+          'ok': true,
+          'stage': 'played',
+          'width': player.state.width,
+          'height': player.state.height,
+          'positionMs': player.state.position.inMilliseconds,
+        });
       } catch (error) {
         evidence['error'] = error.toString();
       } finally {
         await player?.dispose();
         if (plan != null) await repository.release(plan.session);
       }
+      evidence['elapsedMs'] = timer.elapsedMilliseconds;
       sources.add(evidence);
       await report.writeAsString(jsonEncode({'sources': sources}), flush: true);
     }
-    final ok = sources.isNotEmpty && sources.every((source) => source['ok'] == true);
-    await report.writeAsString(jsonEncode({'ok': ok, 'sources': sources}), flush: true);
+    final ok =
+        sources.isNotEmpty && sources.every((source) => source['ok'] == true);
+    await report.writeAsString(
+      jsonEncode({
+        'ok': ok,
+        'checkedAt': DateTime.now().toUtc().toIso8601String(),
+        'sources': sources,
+      }),
+      flush: true,
+    );
     exit(ok ? 0 : 1);
   } catch (error) {
-    await report.writeAsString(jsonEncode({'ok': false, 'error': error.toString(), 'sources': sources}), flush: true);
+    await report.writeAsString(
+      jsonEncode({'ok': false, 'error': error.toString(), 'sources': sources}),
+      flush: true,
+    );
     exit(1);
   }
 }
